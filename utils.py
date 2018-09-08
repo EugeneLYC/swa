@@ -26,7 +26,7 @@ def train_epoch(loader, model, criterion, optimizer):
     for i, (input, target) in enumerate(loader):
         input = input.cuda(async=True)
         target = target.cuda(async=True)
-        input_var = torch.autograd.Variable(input)
+        input_var = torch.autograd.Variable(input).half()
         target_var = torch.autograd.Variable(target)
 
         output = model(input_var)
@@ -36,7 +36,7 @@ def train_epoch(loader, model, criterion, optimizer):
         loss.backward()
         optimizer.step()
 
-        loss_sum += loss.data[0] * input.size(0)
+        loss_sum += loss.item() * input.size(0)
         pred = output.data.max(1, keepdim=True)[1]
         correct += pred.eq(target_var.data.view_as(pred)).sum().item()
 
@@ -55,13 +55,13 @@ def eval(loader, model, criterion):
     for i, (input, target) in enumerate(loader):
         input = input.cuda(async=True)
         target = target.cuda(async=True)
-        input_var = torch.autograd.Variable(input)
+        input_var = torch.autograd.Variable(input).half()
         target_var = torch.autograd.Variable(target)
 
         output = model(input_var)
         loss = criterion(output, target_var)
 
-        loss_sum += loss.data[0] * input.size(0)
+        loss_sum += loss.item() * input.size(0)
         pred = output.data.max(1, keepdim=True)[1]
         correct += pred.eq(target_var.data.view_as(pred)).sum().item()
 
@@ -72,9 +72,11 @@ def eval(loader, model, criterion):
 
 
 def moving_average(net1, net2, alpha=1):
+    net2.cpu().float()
     for param1, param2 in zip(net1.parameters(), net2.parameters()):
         param1.data *= (1.0 - alpha)
         param1.data += param2.data * alpha
+    net2.cuda().half()
 
 
 def _check_bn(module, flag):

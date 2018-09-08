@@ -80,12 +80,12 @@ num_classes = max(train_set.train_labels) + 1
 print('Preparing model')
 model = model_cfg.base(*model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
 model.cuda()
-
+model.half()
 
 if args.swa:
     print('SWA training')
     swa_model = model_cfg.base(*model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
-    swa_model.cuda()
+    # swa_model.cuda()
     swa_n = 0
 else:
     print('SGD training')
