@@ -71,17 +71,22 @@ def eval(loader, model, criterion):
         'accuracy': correct / len(loader.dataset) * 100.0,
     }
 
+def log_time(total_time):
+    f = open('comm_time.txt','a')
+    f.write(str(total_time) + '\n')
+    f.close()
+
 def comm_time(func):
-	def count_time(*args, **kwargs):
-		start_time = datetime.datetime.now()
-		func(*args)
-		over_time = datetime.datetime.now()
-		total_time = (over_time-start_time).total_seconds()
-		print("communication time: %f" % total_time)
-	return count_time
+    def count_time(*args, **kwargs):
+        start_time = datetime.datetime.now()
+        func(*args)
+        over_time = datetime.datetime.now()
+        total_time = (over_time-start_time).total_seconds()
+        log_time(total_time)
+    return count_time
 
 @comm_time
-def moving_average(net1, net2, alpha=1):
+def moving_average(net1, net2, t, alpha=1):
     net1.cpu().float()
     net2.cpu().float()
     for param1, param2 in zip(net1.parameters(), net2.parameters()):
