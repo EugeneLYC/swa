@@ -1,6 +1,6 @@
 import os
 import torch
-
+import datetime
 
 def adjust_learning_rate(optimizer, lr):
     for param_group in optimizer.param_groups:
@@ -70,7 +70,21 @@ def eval(loader, model, criterion):
         'accuracy': correct / len(loader.dataset) * 100.0,
     }
 
+def log_time(total_time):
+    f = open('comm_time.txt','a')
+    f.write(str(total_time) + '\n')
+    f.close()
 
+def comm_time(func):
+    def count_time(*args, **kwargs):
+        start_time = datetime.datetime.now()
+        func(*args)
+        over_time = datetime.datetime.now()
+        total_time = (over_time-start_time).total_seconds()
+        log_time(total_time)
+    return count_time
+
+@comm_time
 def moving_average(net1, net2, alpha=1):
     for param1, param2 in zip(net1.parameters(), net2.parameters()):
         param1.data *= (1.0 - alpha)
