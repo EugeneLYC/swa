@@ -88,15 +88,24 @@ def comm_time(func):
         log_time(total_time)
     return count_time
 
-@comm_time
 def moving_average(net1, net2, t, alpha=1):
     # [net1] : swa_model
     # [net2] : model
-    net2.cpu().float()
+    total_time = 0.0
+    start_time = datetime.datetime.now()
+    net2.cpu()
+    over_time = datetime.datetime.now()
+    total_time += (over_time-start_time).total_seconds()
+    net2.float()
     for param1, param2 in zip(net1.parameters(), net2.parameters()):
         param1.data *= (1.0 - alpha)
         param1.data += param2.data * alpha
-    net2.cuda().half()
+    start_time = datetime.datetime.now()
+    net2.cuda()
+    over_time = datetime.datetime.now()
+    total_time += (over_time-start_time).total_seconds()
+    net2.half()
+    log_time(total_time)
 
 
 def _check_bn(module, flag):
