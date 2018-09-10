@@ -79,6 +79,11 @@ def log_time(total_time):
     f.write(str(total_time) + '\n')
     f.close()
 
+def log_time_h2f(total_time):
+    f = open('half_h2f_time.txt','a')
+    f.write(str(total_time) + '\n')
+    f.close()
+
 def comm_time(func):
     def count_time(*args, **kwargs):
         start_time = datetime.datetime.now()
@@ -96,7 +101,12 @@ def moving_average(net1, net2, t, alpha=1):
     net2.cpu()
     over_time = datetime.datetime.now()
     total_time += (over_time-start_time).total_seconds()
+    h2f_time = 0.0
+    start_time = datetime.datetime.now()
     net2.float()
+    over_time = datetime.datetime.now()
+    h2f_time += (over_time-start_time).total_seconds()
+    log_time_h2f(h2f_time)
     for param1, param2 in zip(net1.parameters(), net2.parameters()):
         param1.data *= (1.0 - alpha)
         param1.data += param2.data * alpha
