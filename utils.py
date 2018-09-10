@@ -86,9 +86,13 @@ def comm_time(func):
 
 @comm_time
 def moving_average(net1, net2, alpha=1):
+	net1.cpu()
+	net2.cpu()
     for param1, param2 in zip(net1.parameters(), net2.parameters()):
         param1.data *= (1.0 - alpha)
         param1.data += param2.data * alpha
+	net1.cuda()
+	net2.cuda()
 
 
 def _check_bn(module, flag):
