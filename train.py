@@ -81,11 +81,11 @@ print('Preparing model')
 model = model_cfg.base(*model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
 model.cuda()
 
-
 if args.swa:
     print('SWA training')
     swa_model = model_cfg.base(*model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
-    swa_model.cuda()
+    # swa_model.cuda()
+    swa_model.float()
     swa_n = 0
 else:
     print('SGD training')
@@ -147,7 +147,8 @@ for epoch in range(start_epoch, args.epochs):
     utils.adjust_learning_rate(optimizer, lr)
     train_res = utils.train_epoch(loaders['train'], model, criterion, optimizer)
     if epoch == 0 or epoch % args.eval_freq == args.eval_freq - 1 or epoch == args.epochs - 1:
-        test_res = utils.eval(loaders['test'], model, criterion)
+        utils.bn_update(loaders['train'], model, use_half=False, use_cuda=True)
+        test_res = utils.eval(loaders['test'], model, criterion, use_half=False, use_cuda=True)
     else:
         test_res = {'loss': None, 'accuracy': None}
 
@@ -155,8 +156,12 @@ for epoch in range(start_epoch, args.epochs):
         utils.moving_average(swa_model, model, 1.0 / (swa_n + 1))
         swa_n += 1
         if epoch == 0 or epoch % args.eval_freq == args.eval_freq - 1 or epoch == args.epochs - 1:
-            utils.bn_update(loaders['train'], swa_model)
-            swa_res = utils.eval(loaders['test'], swa_model, criterion)
+            swa_model.cuda()
+            utils.bn_update(
+                    loaders['train'], swa_model, use_half=False, use_cuda=True)
+            swa_res = utils.eval(
+                    loaders['test'], swa_model, criterion, use_half=False, use_cuda=True)
+            swa_model.cpu()
         else:
             swa_res = {'loss': None, 'accuracy': None}
 

@@ -17,17 +17,21 @@ def save_checkpoint(dir, epoch, **kwargs):
     torch.save(state, filepath)
 
 
-def train_epoch(loader, model, criterion, optimizer):
+def train_epoch(loader, model, criterion, optimizer, use_half=False, use_cuda=True):
     loss_sum = 0.0
     correct = 0.0
 
     model.train()
 
     for i, (input, target) in enumerate(loader):
-        input = input.cuda(async=True)
-        target = target.cuda(async=True)
+        if use_cuda:
+            input = input.cuda(async=True)
+            target = target.cuda(async=True)
+
         input_var = torch.autograd.Variable(input)
         target_var = torch.autograd.Variable(target)
+        if use_half:
+            input_var = input_var.half()
 
         output = model(input_var)
         loss = criterion(output, target_var)
@@ -36,7 +40,7 @@ def train_epoch(loader, model, criterion, optimizer):
         loss.backward()
         optimizer.step()
 
-        loss_sum += loss.data[0] * input.size(0)
+        loss_sum += loss.item() * input.size(0)
         pred = output.data.max(1, keepdim=True)[1]
         correct += pred.eq(target_var.data.view_as(pred)).sum().item()
 
@@ -46,22 +50,25 @@ def train_epoch(loader, model, criterion, optimizer):
     }
 
 
-def eval(loader, model, criterion):
+def eval(loader, model, criterion, use_half=False, use_cuda=True):
     loss_sum = 0.0
     correct = 0.0
 
     model.eval()
 
     for i, (input, target) in enumerate(loader):
-        input = input.cuda(async=True)
-        target = target.cuda(async=True)
+        if use_cuda:
+            input = input.cuda(async=True)
+            target = target.cuda(async=True)
+        if use_half:
+            input = input.half()
         input_var = torch.autograd.Variable(input)
         target_var = torch.autograd.Variable(target)
 
         output = model(input_var)
         loss = criterion(output, target_var)
 
-        loss_sum += loss.data[0] * input.size(0)
+        loss_sum += loss.item() * input.size(0)
         pred = output.data.max(1, keepdim=True)[1]
         correct += pred.eq(target_var.data.view_as(pred)).sum().item()
 
@@ -84,7 +91,9 @@ def comm_time(func):
         log_time(total_time)
     return count_time
 
-def moving_average(net1, net2, alpha=1):
+def moving_average(net1, net2, t, alpha=1):
+    # [net1] : swa_model
+    # [net2] : model
     total_time = 0.0
     start_time = datetime.datetime.now()
     net2.cpu()
@@ -127,7 +136,7 @@ def _set_momenta(module, momenta):
         module.momentum = momenta[module]
 
 
-def bn_update(loader, model):
+def bn_update(loader, model, use_half=False, use_cuda=True):
     """
         BatchNorm buffers update (if any).
         Performs 1 epochs to estimate buffers average using train dataset.
@@ -144,7 +153,10 @@ def bn_update(loader, model):
     model.apply(lambda module: _get_momenta(module, momenta))
     n = 0
     for input, _ in loader:
-        input = input.cuda(async=True)
+        if use_cuda:
+            input = input.cuda(async=True)
+        if use_half:
+            input = input.half()
         input_var = torch.autograd.Variable(input)
         b = input_var.data.size(0)
 
