@@ -47,16 +47,19 @@ def train_epoch(loader, model, criterion, optimizer):
     }
 
 
-def eval(loader, model, criterion):
+def eval(loader, model, criterion, use_half=False, use_cuda=True):
     loss_sum = 0.0
     correct = 0.0
 
     model.eval()
 
     for i, (input, target) in enumerate(loader):
-        input = input.cuda(async=True)
-        target = target.cuda(async=True)
-        input_var = torch.autograd.Variable(input).half()
+        if use_cuda:
+            input = input.cuda(async=True)
+            target = target.cuda(async=True)
+        if use_half:
+            input = input.half()
+        input_var = torch.autograd.Variable(input)
         target_var = torch.autograd.Variable(target)
 
         output = model(input_var)
@@ -72,7 +75,7 @@ def eval(loader, model, criterion):
     }
 
 def log_time(total_time):
-    f = open('comm_time.txt','a')
+    f = open('half_comm_time.txt','a')
     f.write(str(total_time) + '\n')
     f.close()
 
@@ -87,12 +90,12 @@ def comm_time(func):
 
 @comm_time
 def moving_average(net1, net2, t, alpha=1):
-    net1.cpu().float()
+    # [net1] : swa_model
+    # [net2] : model
     net2.cpu().float()
     for param1, param2 in zip(net1.parameters(), net2.parameters()):
         param1.data *= (1.0 - alpha)
         param1.data += param2.data * alpha
-    net1.cuda().half()
     net2.cuda().half()
 
 
@@ -123,7 +126,7 @@ def _set_momenta(module, momenta):
         module.momentum = momenta[module]
 
 
-def bn_update(loader, model):
+def bn_update(loader, model, use_half=False, use_cuda=True):
     """
         BatchNorm buffers update (if any).
         Performs 1 epochs to estimate buffers average using train dataset.
@@ -140,7 +143,10 @@ def bn_update(loader, model):
     model.apply(lambda module: _get_momenta(module, momenta))
     n = 0
     for input, _ in loader:
-        input = input.cuda(async=True)
+        if use_cuda:
+            input = input.cuda(async=True)
+        if use_half:
+            input = input.half()
         input_var = torch.autograd.Variable(input)
         b = input_var.data.size(0)
 
