@@ -71,7 +71,7 @@ def eval(loader, model, criterion):
     }
 
 def log_time(total_time):
-    f = open('comm_time.txt','a')
+    f = open('original_comm_time.txt','a')
     f.write(str(total_time) + '\n')
     f.close()
 
