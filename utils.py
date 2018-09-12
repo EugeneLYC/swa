@@ -16,6 +16,24 @@ def save_checkpoint(dir, epoch, **kwargs):
     filepath = os.path.join(dir, 'checkpoint-%d.pt' % epoch)
     torch.save(state, filepath)
 
+def train_batch(input, target, model, criterion, optimizer, loss_sum, correct):
+    input = input.cuda(async=True)
+    target = target.cuda(async=True)
+    input_var = torch.autograd.Variable(input)
+    target_var = torch.autograd.Variable(target)
+
+    output = model(input_var)
+    loss = criterion(output, target_var)
+
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+    loss_sum += loss.item() * input.size(0)
+    pred = output.data.max(1, keepdim=True)[1]
+    correct += pred.eq(target_var.data.view_as(pred)).sum().item()
+    return loss_sum, correct
+
 
 def train_epoch(loader, model, criterion, optimizer):
     loss_sum = 0.0
@@ -36,7 +54,7 @@ def train_epoch(loader, model, criterion, optimizer):
         loss.backward()
         optimizer.step()
 
-        loss_sum += loss.data[0] * input.size(0)
+        loss_sum += loss.item() * input.size(0)
         pred = output.data.max(1, keepdim=True)[1]
         correct += pred.eq(target_var.data.view_as(pred)).sum().item()
 
@@ -61,7 +79,7 @@ def eval(loader, model, criterion):
         output = model(input_var)
         loss = criterion(output, target_var)
 
-        loss_sum += loss.data[0] * input.size(0)
+        loss_sum += loss.item() * input.size(0)
         pred = output.data.max(1, keepdim=True)[1]
         correct += pred.eq(target_var.data.view_as(pred)).sum().item()
 

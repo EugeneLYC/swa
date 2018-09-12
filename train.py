@@ -8,7 +8,7 @@ import torchvision
 import models
 import utils
 import tabulate
-
+from tensorboardX import SummaryWriter
 
 parser = argparse.ArgumentParser(description='SGD/SWA training')
 parser.add_argument('--dir', type=str, default=None, required=True, help='training directory (default: None)')
@@ -26,7 +26,7 @@ parser.add_argument('--resume', type=str, default=None, metavar='CKPT',
 
 parser.add_argument('--epochs', type=int, default=200, metavar='N', help='number of epochs to train (default: 200)')
 parser.add_argument('--save_freq', type=int, default=25, metavar='N', help='save frequency (default: 25)')
-parser.add_argument('--eval_freq', type=int, default=5, metavar='N', help='evaluation frequency (default: 5)')
+parser.add_argument('--eval_freq', type=int, default=1, metavar='N', help='evaluation frequency (default: 5)')
 parser.add_argument('--lr_init', type=float, default=0.1, metavar='LR', help='initial learning rate (default: 0.01)')
 parser.add_argument('--momentum', type=float, default=0.9, metavar='M', help='SGD momentum (default: 0.9)')
 parser.add_argument('--wd', type=float, default=1e-4, help='weight decay (default: 1e-4)')
@@ -34,8 +34,10 @@ parser.add_argument('--wd', type=float, default=1e-4, help='weight decay (defaul
 parser.add_argument('--swa', action='store_true', help='swa usage flag (default: off)')
 parser.add_argument('--swa_start', type=float, default=161, metavar='N', help='SWA start epoch number (default: 161)')
 parser.add_argument('--swa_lr', type=float, default=0.05, metavar='LR', help='SWA LR (default: 0.05)')
-parser.add_argument('--swa_c_epochs', type=int, default=1, metavar='N',
-                    help='SWA model collection frequency/cycle length in epochs (default: 1)')
+# parser.add_argument('--swa_c_epochs', type=int, default=1, metavar='N',
+#   help='SWA model collection frequency/cycle length in epochs (default: 1)')
+parser.add_argument('--swa_c_ratio', type=float, default=1.0, metavar='N',
+                    help='SWA model collection frequency/cycle length in epochs. Ratio * #epochs will be the new cycle length')
 
 parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
 
@@ -46,6 +48,8 @@ os.makedirs(args.dir, exist_ok=True)
 with open(os.path.join(args.dir, 'command.sh'), 'w') as f:
     f.write(' '.join(sys.argv))
     f.write('\n')
+
+writer = SummaryWriter(log_dir=args.dir)
 
 torch.backends.cudnn.benchmark = True
 torch.manual_seed(args.seed)
@@ -145,18 +149,42 @@ for epoch in range(start_epoch, args.epochs):
 
     lr = schedule(epoch)
     utils.adjust_learning_rate(optimizer, lr)
-    train_res = utils.train_epoch(loaders['train'], model, criterion, optimizer)
+    # train_res = utils.train_epoch(loaders['train'], model, criterion, optimizer)
+
+    loss_sum = 0.0
+    correct = 0.0
+    for i, (input, target) in enumerate(loaders['train']):
+        model.train()
+        loss_sum, correct = utils.train_batch(
+                input, target, model, criterion, optimizer, loss_sum, correct)
+
+        # Iteration based average
+        if args.swa and (epoch + 1) >= args.swa_start and \
+           (i + 1) % int(args.swa_c_ratio*float(len(loaders['train']))) == 0:
+            utils.moving_average(swa_model, model, 1.0 / (swa_n + 1))
+            swa_n += 1
+
+    train_res = {
+        'loss': loss_sum / len(loaders['train'].dataset),
+        'accuracy': correct / len(loaders['train'].dataset) * 100.0,
+    }
+    writer.add_scalar('sgd_train/loss', train_res['loss'],     epoch)
+    writer.add_scalar('sgd_train/acc',  train_res['accuracy'], epoch)
+
     if epoch == 0 or epoch % args.eval_freq == args.eval_freq - 1 or epoch == args.epochs - 1:
         test_res = utils.eval(loaders['test'], model, criterion)
+        writer.add_scalar('sgd_test/loss', test_res['loss'],     epoch)
+        writer.add_scalar('sgd_test/acc',  test_res['accuracy'], epoch)
     else:
         test_res = {'loss': None, 'accuracy': None}
 
-    if args.swa and (epoch + 1) >= args.swa_start and (epoch + 1 - args.swa_start) % args.swa_c_epochs == 0:
-        utils.moving_average(swa_model, model, 1.0 / (swa_n + 1))
-        swa_n += 1
-        if epoch == 0 or epoch % args.eval_freq == args.eval_freq - 1 or epoch == args.epochs - 1:
+    if args.swa and (epoch + 1) >= args.swa_start:
+        if epoch == 0 or epoch % args.eval_freq == args.eval_freq - 1 \
+           or epoch == args.epochs - 1:
             utils.bn_update(loaders['train'], swa_model)
             swa_res = utils.eval(loaders['test'], swa_model, criterion)
+            writer.add_scalar('swa_test/loss', swa_res['loss'],     epoch)
+            writer.add_scalar('swa_test/acc',  swa_res['accuracy'], epoch)
         else:
             swa_res = {'loss': None, 'accuracy': None}
 
@@ -169,6 +197,17 @@ for epoch in range(start_epoch, args.epochs):
             swa_n=swa_n if args.swa else None,
             optimizer=optimizer.state_dict()
         )
+
+    if (epoch + 1) % args.swa_start == 0:
+        utils.save_checkpoint(
+            args.dir,
+            epoch + 1,
+            state_dict=model.state_dict(),
+            swa_state_dict=swa_model.state_dict() if args.swa else None,
+            swa_n=swa_n if args.swa else None,
+            optimizer=optimizer.state_dict()
+        )
+
 
     time_ep = time.time() - time_ep
     values = [epoch + 1, lr, train_res['loss'], train_res['accuracy'], test_res['loss'], test_res['accuracy'], time_ep]
