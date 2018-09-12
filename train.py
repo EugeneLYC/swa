@@ -141,32 +141,35 @@ utils.save_checkpoint(
 )
 
 for epoch in range(start_epoch, args.epochs):
-    time_ep = time.time()
+	time_ep = time.time()
 
-    lr = schedule(epoch)
-    utils.adjust_learning_rate(optimizer, lr)
-    train_res = utils.train_epoch(loaders['train'], model, criterion, optimizer)
-    if epoch == 0 or epoch % args.eval_freq == args.eval_freq - 1 or epoch == args.epochs - 1:
-        utils.bn_update(loaders['train'], model, use_half=False, use_cuda=True)
-        test_res = utils.eval(loaders['test'], model, criterion, use_half=False, use_cuda=True)
-    else:
-        test_res = {'loss': None, 'accuracy': None}
+	lr = schedule(epoch)
+	utils.adjust_learning_rate(optimizer, lr)
+	train_res = utils.train_epoch(loaders['train'], model, criterion, optimizer)
+	if epoch == 0 or epoch % args.eval_freq == args.eval_freq - 1 or epoch == args.epochs - 1:
+		utils.bn_update(loaders['train'], model, use_half=False, use_cuda=True)
+		test_res = utils.eval(loaders['test'], model, criterion, use_half=False, use_cuda=True)
+		f_curve = open('curve_f32.txt','a')
+		f_curve.write(str(epoch)+'\t'+str(test_res['accuracy'])+'\n')
+		f_curve.close()
+	else:
+		test_res = {'loss': None, 'accuracy': None}
 
-    if args.swa and (epoch + 1) >= args.swa_start and (epoch + 1 - args.swa_start) % args.swa_c_epochs == 0:
-        utils.moving_average(swa_model, model, 1.0 / (swa_n + 1))
-        swa_n += 1
-        if epoch == 0 or epoch % args.eval_freq == args.eval_freq - 1 or epoch == args.epochs - 1:
-            swa_model.cuda()
-            utils.bn_update(
+	if args.swa and (epoch + 1) >= args.swa_start and (epoch + 1 - args.swa_start) % args.swa_c_epochs == 0:
+		utils.moving_average(swa_model, model, 1.0 / (swa_n + 1))
+		swa_n += 1
+		if epoch == 0 or epoch % args.eval_freq == args.eval_freq - 1 or epoch == args.epochs - 1:
+			swa_model.cuda()
+			utils.bn_update(
                     loaders['train'], swa_model, use_half=False, use_cuda=True)
-            swa_res = utils.eval(
+			swa_res = utils.eval(
                     loaders['test'], swa_model, criterion, use_half=False, use_cuda=True)
-            swa_model.cpu()
-        else:
-            swa_res = {'loss': None, 'accuracy': None}
+			swa_model.cpu()
+		else:
+			swa_res = {'loss': None, 'accuracy': None}
 
-    if (epoch + 1) % args.save_freq == 0:
-        utils.save_checkpoint(
+	if (epoch + 1) % args.save_freq == 0:
+		utils.save_checkpoint(
             args.dir,
             epoch + 1,
             state_dict=model.state_dict(),
@@ -175,17 +178,17 @@ for epoch in range(start_epoch, args.epochs):
             optimizer=optimizer.state_dict()
         )
 
-    time_ep = time.time() - time_ep
-    values = [epoch + 1, lr, train_res['loss'], train_res['accuracy'], test_res['loss'], test_res['accuracy'], time_ep]
-    if args.swa:
-        values = values[:-1] + [swa_res['loss'], swa_res['accuracy']] + values[-1:]
-    table = tabulate.tabulate([values], columns, tablefmt='simple', floatfmt='8.4f')
-    if epoch % 40 == 0:
-        table = table.split('\n')
-        table = '\n'.join([table[1]] + table)
-    else:
-        table = table.split('\n')[2]
-    print(table)
+	time_ep = time.time() - time_ep
+	values = [epoch + 1, lr, train_res['loss'], train_res['accuracy'], test_res['loss'], test_res['accuracy'], time_ep]
+	if args.swa:
+		values = values[:-1] + [swa_res['loss'], swa_res['accuracy']] + values[-1:]
+	table = tabulate.tabulate([values], columns, tablefmt='simple', floatfmt='8.4f')
+	if epoch % 40 == 0:
+		table = table.split('\n')
+		table = '\n'.join([table[1]] + table)
+	else:
+		table = table.split('\n')[2]
+	print(table)
 
 if args.epochs % args.save_freq != 0:
     utils.save_checkpoint(
