@@ -78,7 +78,7 @@ def eval(loader, model, criterion, use_half=False, use_cuda=True):
     }
 
 def log_time(total_time):
-    f = open('original_comm_time.txt','a')
+    f = open('f32_comm_time.txt','a')
     f.write(str(total_time) + '\n')
     f.close()
 
@@ -91,22 +91,28 @@ def comm_time(func):
         log_time(total_time)
     return count_time
 
-def moving_average(net1, net2, t, alpha=1):
+def moving_average(net1, net2, t, alpha=1, log_time_flag=True):
     # [net1] : swa_model
     # [net2] : model
-    total_time = 0.0
-    start_time = datetime.datetime.now()
-    net2.cpu()
-    over_time = datetime.datetime.now()
-    total_time += (over_time-start_time).total_seconds()
-    for param1, param2 in zip(net1.parameters(), net2.parameters()):
-        param1.data *= (1.0 - alpha)
-        param1.data += param2.data * alpha
-    start_time = datetime.datetime.now()
-    net2.cuda()
-    over_time = datetime.datetime.now()
-    total_time += (over_time-start_time).total_seconds()
-    log_time(total_time)
+	total_time = 0.0
+	if log_time_flag:
+		start_time = datetime.datetime.now()
+		net2.cpu()
+		over_time = datetime.datetime.now()
+		total_time += (over_time-start_time).total_seconds()
+	else:
+		net2.cpu()
+	for param1, param2 in zip(net1.parameters(), net2.parameters()):
+		param1.data *= (1.0 - alpha)
+		param1.data += param2.data * alpha
+	if log_time_flag:
+		start_time = datetime.datetime.now()
+		net2.cuda()
+		over_time = datetime.datetime.now()
+		total_time += (over_time-start_time).total_seconds()
+		log_time(total_time)
+	else:
+		net2.cuda()
 
 
 def _check_bn(module, flag):
