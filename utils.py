@@ -1,0 +1,179 @@
+import os
+import torch
+import datetime
+
+
+def adjust_learning_rate(optimizer, lr):
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return lr
+
+
+def save_checkpoint(dir, epoch, **kwargs):
+    state = {
+        'epoch': epoch,
+    }
+    state.update(kwargs)
+    filepath = os.path.join(dir, 'checkpoint-%d.pt' % epoch)
+    torch.save(state, filepath)
+
+
+def train_epoch(loader, model, criterion, optimizer):
+    loss_sum = 0.0
+    correct = 0.0
+
+    model.train()
+
+    for i, (input, target) in enumerate(loader):
+        input = input.cuda(async=True)
+        target = target.cuda(async=True)
+        input_var = torch.autograd.Variable(input).half()
+        target_var = torch.autograd.Variable(target)
+
+        output = model(input_var)
+        loss = criterion(output, target_var)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        loss_sum += loss.item() * input.size(0)
+        pred = output.data.max(1, keepdim=True)[1]
+        correct += pred.eq(target_var.data.view_as(pred)).sum().item()
+
+    return {
+        'loss': loss_sum / len(loader.dataset),
+        'accuracy': correct / len(loader.dataset) * 100.0,
+    }
+
+
+def eval(loader, model, criterion, use_half=False, use_cuda=True):
+    loss_sum = 0.0
+    correct = 0.0
+
+    model.eval()
+
+    for i, (input, target) in enumerate(loader):
+        if use_cuda:
+            input = input.cuda(async=True)
+            target = target.cuda(async=True)
+        if use_half:
+            input = input.half()
+        input_var = torch.autograd.Variable(input)
+        target_var = torch.autograd.Variable(target)
+
+        output = model(input_var)
+        loss = criterion(output, target_var)
+
+        loss_sum += loss.item() * input.size(0)
+        pred = output.data.max(1, keepdim=True)[1]
+        correct += pred.eq(target_var.data.view_as(pred)).sum().item()
+
+    return {
+        'loss': loss_sum / len(loader.dataset),
+        'accuracy': correct / len(loader.dataset) * 100.0,
+    }
+
+def log_time(total_time):
+    f = open('half_comm_time.txt','a')
+    f.write(str(total_time) + '\n')
+    f.close()
+
+def log_time_h2f(total_time):
+    f = open('half_h2f_time.txt','a')
+    f.write(str(total_time) + '\n')
+    f.close()
+
+def comm_time(func):
+    def count_time(*args, **kwargs):
+        start_time = datetime.datetime.now()
+        func(*args)
+        over_time = datetime.datetime.now()
+        total_time = (over_time-start_time).total_seconds()
+        log_time(total_time)
+    return count_time
+
+def moving_average(net1, net2, t, alpha=1):
+    # [net1] : swa_model
+    # [net2] : model
+    total_time = 0.0
+    start_time = datetime.datetime.now()
+    net2.cpu()
+    over_time = datetime.datetime.now()
+    total_time += (over_time-start_time).total_seconds()
+    h2f_time = 0.0
+    start_time = datetime.datetime.now()
+    net2.float()
+    over_time = datetime.datetime.now()
+    h2f_time += (over_time-start_time).total_seconds()
+    log_time_h2f(h2f_time)
+    for param1, param2 in zip(net1.parameters(), net2.parameters()):
+        param1.data *= (1.0 - alpha)
+        param1.data += param2.data * alpha
+    start_time = datetime.datetime.now()
+    net2.cuda()
+    over_time = datetime.datetime.now()
+    total_time += (over_time-start_time).total_seconds()
+    net2.half()
+    log_time(total_time)
+
+
+def _check_bn(module, flag):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        flag[0] = True
+
+
+def check_bn(model):
+    flag = [False]
+    model.apply(lambda module: _check_bn(module, flag))
+    return flag[0]
+
+
+def reset_bn(module):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        module.running_mean = torch.zeros_like(module.running_mean)
+        module.running_var = torch.ones_like(module.running_var)
+
+
+def _get_momenta(module, momenta):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        momenta[module] = module.momentum
+
+
+def _set_momenta(module, momenta):
+    if issubclass(module.__class__, torch.nn.modules.batchnorm._BatchNorm):
+        module.momentum = momenta[module]
+
+
+def bn_update(loader, model, use_half=False, use_cuda=True):
+    """
+        BatchNorm buffers update (if any).
+        Performs 1 epochs to estimate buffers average using train dataset.
+
+        :param loader: train dataset loader for buffers average estimation.
+        :param model: model being update
+        :return: None
+    """
+    if not check_bn(model):
+        return
+    model.train()
+    momenta = {}
+    model.apply(reset_bn)
+    model.apply(lambda module: _get_momenta(module, momenta))
+    n = 0
+    for input, _ in loader:
+        if use_cuda:
+            input = input.cuda(async=True)
+        if use_half:
+            input = input.half()
+        input_var = torch.autograd.Variable(input)
+        b = input_var.data.size(0)
+
+        momentum = b / (n + b)
+        for module in momenta.keys():
+            module.momentum = momentum
+
+        model(input_var)
+        n += b
+
+    model.apply(lambda module: _set_momenta(module, momenta))
