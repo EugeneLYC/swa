@@ -31,12 +31,6 @@ parser.add_argument('--lr_init', type=float, default=0.1, metavar='LR', help='in
 parser.add_argument('--momentum', type=float, default=0.9, metavar='M', help='SGD momentum (default: 0.9)')
 parser.add_argument('--wd', type=float, default=1e-4, help='weight decay (default: 1e-4)')
 
-parser.add_argument('--swa', action='store_true', help='swa usage flag (default: off)')
-parser.add_argument('--swa_start', type=float, default=161, metavar='N', help='SWA start epoch number (default: 161)')
-parser.add_argument('--swa_lr', type=float, default=0.05, metavar='LR', help='SWA LR (default: 0.05)')
-parser.add_argument('--swa_c_epochs', type=int, default=1, metavar='N',
-                    help='SWA model collection frequency/cycle length in epochs (default: 1)')
-
 parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
 
 args = parser.parse_args()
@@ -80,16 +74,6 @@ num_classes = max(train_set.train_labels) + 1
 print('Preparing model')
 model = model_cfg.base(*model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
 model.cuda()
-model.half()
-
-if args.swa:
-    print('SWA training')
-    swa_model = model_cfg.base(*model_cfg.args, num_classes=num_classes, **model_cfg.kwargs)
-    # swa_model.cuda()
-    swa_model.float()
-    swa_n = 0
-else:
-    print('SGD training')
 
 
 def schedule(epoch):
@@ -113,33 +97,8 @@ optimizer = torch.optim.SGD(
 )
 
 start_epoch = 0
-if args.resume is not None:
-    print('Resume training from %s' % args.resume)
-    checkpoint = torch.load(args.resume)
-    start_epoch = checkpoint['epoch']
-    model.load_state_dict(checkpoint['state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    if args.swa:
-        swa_state_dict = checkpoint['swa_state_dict']
-        if swa_state_dict is not None:
-            swa_model.load_state_dict(swa_state_dict)
-        swa_n_ckpt = checkpoint['swa_n']
-        if swa_n_ckpt is not None:
-            swa_n = swa_n_ckpt
 
 columns = ['ep', 'lr', 'tr_loss', 'tr_acc', 'te_loss', 'te_acc', 'time']
-if args.swa:
-    columns = columns[:-1] + ['swa_te_loss', 'swa_te_acc'] + columns[-1:]
-    swa_res = {'loss': None, 'accuracy': None}
-
-utils.save_checkpoint(
-    args.dir,
-    start_epoch,
-    state_dict=model.state_dict(),
-    swa_state_dict=swa_model.state_dict() if args.swa else None,
-    swa_n=swa_n if args.swa else None,
-    optimizer=optimizer.state_dict()
-)
 
 for epoch in range(start_epoch, args.epochs):
     time_ep = time.time()
@@ -153,33 +112,8 @@ for epoch in range(start_epoch, args.epochs):
     else:
         test_res = {'loss': None, 'accuracy': None}
 
-    if args.swa and (epoch + 1) >= args.swa_start and (epoch + 1 - args.swa_start) % args.swa_c_epochs == 0:
-        utils.moving_average(swa_model, model, 1.0 / (swa_n + 1))
-        swa_n += 1
-        if epoch == 0 or epoch % args.eval_freq == args.eval_freq - 1 or epoch == args.epochs - 1:
-            swa_model.cuda()
-            utils.bn_update(
-                    loaders['train'], swa_model, use_half=False, use_cuda=True)
-            swa_res = utils.eval(
-                    loaders['test'], swa_model, criterion, use_half=False, use_cuda=True)
-            swa_model.cpu()
-        else:
-            swa_res = {'loss': None, 'accuracy': None}
-
-    if (epoch + 1) % args.save_freq == 0:
-        utils.save_checkpoint(
-            args.dir,
-            epoch + 1,
-            state_dict=model.state_dict(),
-            swa_state_dict=swa_model.state_dict() if args.swa else None,
-            swa_n=swa_n if args.swa else None,
-            optimizer=optimizer.state_dict()
-        )
-
     time_ep = time.time() - time_ep
     values = [epoch + 1, lr, train_res['loss'], train_res['accuracy'], test_res['loss'], test_res['accuracy'], time_ep]
-    if args.swa:
-        values = values[:-1] + [swa_res['loss'], swa_res['accuracy']] + values[-1:]
     table = tabulate.tabulate([values], columns, tablefmt='simple', floatfmt='8.4f')
     if epoch % 40 == 0:
         table = table.split('\n')
@@ -187,13 +121,3 @@ for epoch in range(start_epoch, args.epochs):
     else:
         table = table.split('\n')[2]
     print(table)
-
-if args.epochs % args.save_freq != 0:
-    utils.save_checkpoint(
-        args.dir,
-        args.epochs,
-        state_dict=model.state_dict(),
-        swa_state_dict=swa_model.state_dict() if args.swa else None,
-        swa_n=swa_n if args.swa else None,
-        optimizer=optimizer.state_dict()
-    )

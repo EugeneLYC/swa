@@ -1,21 +1,11 @@
 import os
 import torch
-import datetime
 
 
 def adjust_learning_rate(optimizer, lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
     return lr
-
-
-def save_checkpoint(dir, epoch, **kwargs):
-    state = {
-        'epoch': epoch,
-    }
-    state.update(kwargs)
-    filepath = os.path.join(dir, 'checkpoint-%d.pt' % epoch)
-    torch.save(state, filepath)
 
 
 def train_epoch(loader, model, criterion, optimizer):
@@ -73,49 +63,6 @@ def eval(loader, model, criterion, use_half=False, use_cuda=True):
         'loss': loss_sum / len(loader.dataset),
         'accuracy': correct / len(loader.dataset) * 100.0,
     }
-
-def log_time(total_time):
-    f = open('half_comm_time.txt','a')
-    f.write(str(total_time) + '\n')
-    f.close()
-
-def log_time_h2f(total_time):
-    f = open('half_h2f_time.txt','a')
-    f.write(str(total_time) + '\n')
-    f.close()
-
-def comm_time(func):
-    def count_time(*args, **kwargs):
-        start_time = datetime.datetime.now()
-        func(*args)
-        over_time = datetime.datetime.now()
-        total_time = (over_time-start_time).total_seconds()
-        log_time(total_time)
-    return count_time
-
-def moving_average(net1, net2, t, alpha=1):
-    # [net1] : swa_model
-    # [net2] : model
-    total_time = 0.0
-    start_time = datetime.datetime.now()
-    net2.cpu()
-    over_time = datetime.datetime.now()
-    total_time += (over_time-start_time).total_seconds()
-    h2f_time = 0.0
-    start_time = datetime.datetime.now()
-    net2.float()
-    over_time = datetime.datetime.now()
-    h2f_time += (over_time-start_time).total_seconds()
-    log_time_h2f(h2f_time)
-    for param1, param2 in zip(net1.parameters(), net2.parameters()):
-        param1.data *= (1.0 - alpha)
-        param1.data += param2.data * alpha
-    start_time = datetime.datetime.now()
-    net2.cuda()
-    over_time = datetime.datetime.now()
-    total_time += (over_time-start_time).total_seconds()
-    net2.half()
-    log_time(total_time)
 
 
 def _check_bn(module, flag):
